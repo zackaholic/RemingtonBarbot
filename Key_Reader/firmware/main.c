@@ -31,7 +31,7 @@ void USART_transmit(unsigned char data) {
   UDR = data;
 }
 
-/********************SPI Stuff*****************/
+/********************SPI Stuff******************/
 void pulse_clock() {
   PORTB |= (1 << PB4);
   _delay_us(10);
@@ -111,12 +111,17 @@ uint8_t EEPROM_read(uint8_t uiAddress){
 }
 
 /********************Other Stuff******************/
-int16_t getActiveSwitch() {
-  uint8_t frame;
-  uint8_t pos;
-  uint8_t i;
-  uint8_t j;
-  uint8_t index = 255;
+
+void transmitCharacter(key) {
+  USART_transmit(key);
+}
+
+int8_t getActiveSwitch() {
+  int8_t frame;
+  int8_t pos;
+  int8_t i;
+  int8_t j;
+  int8_t index = -1;
   //load register states into switch array
   loadSwitchStates();
   //loop through entire switch array
@@ -134,29 +139,42 @@ int16_t getActiveSwitch() {
   return index;
 }
 
-uint8_t programKeys() {
-  uint8_t prompt[] = "Please press key: ";
-  uint8_t characters[] = {'a', 'b', 'c', 'd', 'e', 'f',
+int8_t getKey() {
+  int8_t key;
+  int8_t switchIndex = getActiveSwitch();
+  if (switchIndex >= 0) {
+    _delay_ms(10);
+    if (switchIndex == getActiveSwitch()) {
+      key = EEPROM_read(switchIndex);
+      return key;
+    }
+  }
+  return -1;
+}
+
+void programKeys() {
+  int8_t prompt[] = "Please press key ";
+  int8_t characters[] = {'a', 'b', 'c', 'd', 'e', 'f',
           'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
           'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x',
           'y', 'z'};
   uint8_t i;
-  uint8_t character;
-  uint8_t input = 255;
+  int8_t input = -1;
 
-  for (i = 0; i < 18; i++) {
+  for (i = 0; i < 17; i++) {
     USART_transmit(prompt[i]);
   }
   for (i = 0; i < 16; i++) {
     USART_transmit(characters[i]);
-    while(input == 255) {
+    USART_transmit(':');
+    while(input < 0) {
       input = getActiveSwitch();
     }
-    _delay_ms(1000);
+    _delay_ms(500);
     USART_transmit(input);
+    USART_transmit('\n');
     EEPROM_write(input, characters[i]);
-    USART_transmit(EEPROM_read(input));
-    input = 255;
+    input = -1;
   }
 }
 
@@ -164,20 +182,23 @@ uint8_t programKeys() {
 
 int main(void)
 {
+  int8_t keyPressed;
+  int8_t previousKeyPressed = -1;
+
   USART_init(MYUBRR);  
   SPI_init();
 
 //  programKeys();
 
   for(;;){
-    _delay_ms(1000);
-
-
-    uint8_t key = getActiveSwitch();
-    if (key != 255) {
-//      USART_transmit(key);
-      USART_transmit(EEPROM_read(key));
+    keyPressed = getKey();
+    if (keyPressed >= 0) {
+      if (keyPressed != previousKeyPressed) {
+        transmitCharacter(keyPressed);
+        previousKeyPressed = keyPressed;
+      }
     }
+    previousKeyPressed = keyPressed;
   }
   return 0;   /* never reached */
 }
