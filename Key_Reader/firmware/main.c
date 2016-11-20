@@ -10,10 +10,15 @@
 #include <inttypes.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
+#include <ctype.h>
 
 #define FOSC 8000000 
 #define BAUD 38400
 #define MYUBRR FOSC/16/BAUD-1
+
+#define NUM_KEYS 16
+#define SHIFT_KEY 0 //index of switch connected to shift key
+uint8_t shiftDown;
 
 /********************UART Stuff*****************/
 void USART_init(uint16_t baud) { 
@@ -69,25 +74,17 @@ void SPI_init() {
   PORTB = (1 << PB7);
 }
 
-uint8_t switchStates[2];
-
-void loadSwitchStates() {
-  uint8_t inByte;
+uint64_t getSwitchStates() {
+  uint64_t switches;
   uint8_t i;
-  uint8_t j;
-  uint8_t serState;
 
   SPI_load();
 
-  for (j = 0; j < 2; j++) {
-    for (i = 0; i < 8; i++) {
-      serState = (PINB & (1 << PB6)) >> 6;
-      pulse_clock();
-      inByte |= (serState << i);
-    }
-    switchStates[j] = inByte;
-    inByte = 0;
+  for (i = 0; i < NUM_KEYS; i++) {
+    switches |= (((PINB & (1 << PB6)) >> 6) << i);
+    pulse_clock();
   }
+  return switches;
 }
 
 /**************EEPROM Stuff*********************/
@@ -117,26 +114,77 @@ void transmitCharacter(key) {
 }
 
 int8_t getActiveSwitch() {
-  int8_t frame;
-  int8_t pos;
-  int8_t i;
-  int8_t j;
   int8_t index = -1;
-  //load register states into switch array
-  loadSwitchStates();
-  //loop through entire switch array
-  for (i = 0; i < 2; i++) {
-    if (switchStates[i] < 255) {
-      frame = i;
-      for (j = 0; j < 8; j++) {
-        if (!(switchStates[frame] & (1 << j))) {
-          pos = j;
-          index = frame * 8 + pos;
-        }
+  uint64_t switches;
+  uint8_t i;
+
+  shiftDown = 0;
+  switches = getSwitchStates();
+  for (i = 0; i < NUM_KEYS; i++) {
+    if (!(switches & (1 << i))) {
+      if (i == SHIFT_KEY) {
+        shiftDown = 1;
+      } else {
+        index = i;
       }
     }
   }
   return index;
+}
+
+uint8_t applyShiftKey(uint8_t character) {
+  uint8_t shiftedChar;
+
+  if (isalpha(character)) {
+    shiftedChar = (uint8_t)toupper(character);  
+  } else if
+    (isdigit(character)) {
+    switch (character) {
+      case '0':
+        shiftedChar = ')';
+        break;
+      case '2':
+        shiftedChar = '\"';
+        break;
+      case '3':
+        shiftedChar = '#';
+        break;
+      case '4':
+        shiftedChar = '$';
+        break;
+      case '5':
+        shiftedChar = '%';
+        break;
+      case '6':
+        shiftedChar = '_';
+        break;
+      case '7':
+        shiftedChar = '&';
+        break;
+      case '8':
+        shiftedChar = '\'';
+        break;
+      case '9':
+        shiftedChar = '(';
+        break;
+    }
+  } else {
+    switch(character) {
+      // case '-':
+      //   // 3/4 
+      //   break;
+      case ';':
+        shiftedChar = ':';
+        break;
+      case '/':
+        shiftedChar = '?';
+        break;
+      // case 1/2
+      //   shiftedChar = 1/4;
+      //   break;
+    }
+  }
+  return shiftedChar;  
 }
 
 int8_t getKey() {
@@ -146,6 +194,9 @@ int8_t getKey() {
     _delay_ms(10);
     if (switchIndex == getActiveSwitch()) {
       key = EEPROM_read(switchIndex);
+      if (shiftDown) {
+        key = applyShiftKey(key);
+      }
       return key;
     }
   }
